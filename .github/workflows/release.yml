@@ -15,7 +15,7 @@ jobs:
     name: Тесты
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Юнит-тесты
         run: python3 -m unittest discover -s tests -t . -v
 
@@ -26,7 +26,7 @@ jobs:
     # сборки, тем на большем числе систем бинарник заведётся.
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Системные модули
         run: |
@@ -63,7 +63,7 @@ jobs:
     needs: tests
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Версия из тега
         id: version
@@ -77,8 +77,12 @@ jobs:
       - name: Сборка пакета
         run: bash packaging/build_deb.sh "${{ steps.version.outputs.value }}"
 
-      - name: Что внутри
-        run: dpkg-deb --info --contents dist/*.deb
+      - name: Что внутри пакета
+        # --info и --contents — два разных действия, dpkg-deb принимает только
+        # одно за вызов: вместе они дают «two commands specified» и код 2.
+        run: |
+          dpkg-deb --info dist/*.deb
+          dpkg-deb --contents dist/*.deb
 
       - uses: actions/upload-artifact@v4
         with:
