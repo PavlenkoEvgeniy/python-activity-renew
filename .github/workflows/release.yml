@@ -112,5 +112,8 @@ jobs:
       - name: Приложить файлы к релизу
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # В этом job'е нет checkout, поэтому git-дерева тоже нет — сам gh
+          # репозиторий не определит и падает на «not a git repository».
+          GH_REPO: ${{ github.repository }}
         run: |
           gh release upload "${{ github.event.release.tag_name }}" dist/* --clobber
