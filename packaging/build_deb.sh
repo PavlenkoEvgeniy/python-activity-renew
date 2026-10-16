@@ -20,7 +20,13 @@ if [ $# -ne 1 ]; then
 fi
 
 VERSION="$1"
+#: Имя пакета и команды в /usr/bin.
 PKG="activity-renew"
+#: Имя python-модуля. Именно с подчёркиванием: каталог в dist-packages должен
+#: называться так же, как модуль, иначе `python3 -m activity_renew` его не
+#: найдёт. Дефис в имени модуля недопустим, и однажды это уже стоило
+#: неработающего релиза — не возвращайте сюда $PKG.
+MODULE="activity_renew"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${OUT_DIR:-$ROOT/dist}"
 MAINTAINER="${MAINTAINER:-Pavlenko Evgeniy <pavlenkoevgeniy85@gmail.com>}"
@@ -31,7 +37,7 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 chmod 755 "$STAGE"  # mktemp даёт 0700, а корень пакета должен быть обычным
 
-PYDIR="$STAGE/usr/lib/python3/dist-packages/$PKG"
+PYDIR="$STAGE/usr/lib/python3/dist-packages/$MODULE"
 install -d "$STAGE/DEBIAN" "$PYDIR" "$STAGE/usr/bin" \
     "$STAGE/usr/share/applications" "$STAGE/etc/udev/rules.d" \
     "$STAGE/usr/share/doc/$PKG"

@@ -84,6 +84,16 @@ jobs:
           dpkg-deb --info dist/*.deb
           dpkg-deb --contents dist/*.deb
 
+      - name: Пакет ставится и запускается
+        # Ставим по-настоящему и запускаем из нейтрального каталога. Если
+        # запускать из корня репозитория, python найдёт исходники в текущей
+        # папке и проверка не докажет ничего — ровно на этом уже уехал
+        # нерабочий релиз 0.1.0 (каталог в dist-packages назывался через дефис).
+        run: |
+          sudo apt-get install -y ./dist/activity-renew_*_all.deb
+          cd /tmp
+          activity-renew --version
+
       - uses: actions/upload-artifact@v4
         with:
           name: activity-renew-deb
