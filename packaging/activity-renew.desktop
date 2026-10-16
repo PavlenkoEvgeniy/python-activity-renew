@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=activity-renew
+Comment=Jiggles the mouse so the session is not considered idle
+Comment[ru]=Дёргает мышь, чтобы сессия не считалась простаивающей
+Exec=activity-renew
+Icon=input-mouse
+Terminal=false
+Categories=Utility;
+Keywords=mouse;idle;activity;jiggler;

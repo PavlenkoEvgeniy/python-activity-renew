@@ -1,0 +1,11 @@
+#!/bin/sh
+# Применяем udev-правило сразу, не дожидаясь перезагрузки: иначе первый запуск
+# после установки удивит сообщением «композитор не видит виртуальную мышь».
+set -e
+
+if [ "$1" = "configure" ] && command -v udevadm >/dev/null 2>&1; then
+    udevadm control --reload-rules || true
+    udevadm trigger --subsystem-match=input || true
+fi
+
+exit 0

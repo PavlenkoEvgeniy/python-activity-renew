@@ -1,0 +1,112 @@
+name: Release
+
+# Сборка запускается при публикации релиза на GitHub. Кнопка «Run workflow»
+# нужна для проверки сборки без релиза: артефакты тогда просто лежат в прогоне.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Тесты
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Юнит-тесты
+        run: python3 -m unittest discover -s tests -t . -v
+
+  binary:
+    name: Бинарник (PyInstaller, x86_64)
+    needs: tests
+    # Собираем на самой старой из поддерживаемых Ubuntu: чем старее glibc у
+    # сборки, тем на большем числе систем бинарник заведётся.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Системные модули
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3-venv python3-tk python3-dbus python3-evdev
+
+      - name: Сборка бинарника
+        run: |
+          # --system-site-packages: tkinter, dbus и evdev взяты из apt, а не из pip
+          python3 -m venv --system-site-packages .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install pyinstaller
+          .venv/bin/pyinstaller \
+            --onefile \
+            --name activity-renew \
+            --collect-submodules dbus \
+            --hidden-import evdev \
+            main.py
+
+      - name: Бинарник запускается
+        # Проверяет, что внутрь уехали python, tkinter и dbus: до argparse дело
+        # доходит только если все импорты на месте.
+        run: ./dist/activity-renew --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: activity-renew-binary
+          path: dist/activity-renew
+          if-no-files-found: error
+
+  deb:
+    name: Пакет .deb
+    needs: tests
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Версия из тега
+        id: version
+        run: |
+          tag="${{ github.event.release.tag_name }}"
+          if [ -z "$tag" ]; then
+            tag="0.0.0+$(git rev-parse --short HEAD)"
+          fi
+          echo "value=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Сборка пакета
+        run: bash packaging/build_deb.sh "${{ steps.version.outputs.value }}"
+
+      - name: Что внутри
+        run: dpkg-deb --info --contents dist/*.deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: activity-renew-deb
+          path: dist/*.deb
+          if-no-files-found: error
+
+  publish:
+    name: Приложить к релизу
+    needs: [binary, deb]
+    if: github.event_name == 'release'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Контрольные суммы
+        run: |
+          cd dist
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Приложить файлы к релизу
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" dist/* --clobber
