@@ -19,6 +19,8 @@ import time
 
 import dbus
 
+from .i18n import tr
+
 DEVICE_NAME = "activity-renew virtual pointer"
 VENDOR, PRODUCT, DEVICE_VERSION = 0x1A2B, 0x0001, 1
 
@@ -107,9 +109,7 @@ def _load_evdev():
     try:
         from evdev import UInput, ecodes
     except ImportError as exc:
-        raise JigglerUnavailable(
-            "нет модуля evdev (пакет python3-evdev) — виртуальную мышь создать нельзя"
-        ) from exc
+        raise JigglerUnavailable(tr("jiggler_no_evdev")) from exc
     return UInput, ecodes
 
 
@@ -137,9 +137,7 @@ class UinputJiggler:
             )
         except (OSError, PermissionError) as exc:
             raise JigglerUnavailable(
-                f"не удалось открыть /dev/uinput: {exc}.\n"
-                "Нужно udev-правило, дающее доступ к /dev/uinput текущему "
-                "пользователю (см. README)."
+                tr("jiggler_uinput_failed", error=exc)
             ) from exc
 
     def _move(self, dx: int, dy: int) -> None:
@@ -174,7 +172,7 @@ class UinputJiggler:
         time.sleep(DEVICE_SETTLE_SECONDS)
         before = pointer_position()
         if before is None:
-            return True, "проверить не удалось: xdotool недоступен, позиция курсора неизвестна"
+            return True, tr("jiggler_untested")
 
         self._move(25, 0)
         time.sleep(0.15)
@@ -183,12 +181,10 @@ class UinputJiggler:
         time.sleep(0.15)
 
         if moved is None or moved == before:
-            return False, (
-                "виртуальная мышь создана, но курсор не сдвинулся — композитор её "
-                "не видит. Нужно udev-правило с TAG+=\"uaccess\" для устройства "
-                f"«{DEVICE_NAME}» (см. README)."
-            )
-        return True, f"виртуальная мышь работает (проверка сдвигом на 25 px: {before[0]} → {moved[0]})"
+            return False, tr("jiggler_not_seen", name=DEVICE_NAME)
+        return True, tr(
+            "jiggler_works", before=before[0], after=moved[0]
+        )
 
     def close(self) -> None:
         try:
@@ -200,7 +196,8 @@ class UinputJiggler:
 class InhibitKeeper:
     """Ингибит простоя: прямо просим сессию не засыпать — мышь не двигается."""
 
-    REASON = "activity-renew: имитация активности"
+    #: Причина видна в системных средствах управления сессией.
+    REASON = "activity-renew: activity simulation"
     #: Флаги org.gnome.SessionManager.Inhibit: 1 — выход, 2 — смена пользователя,
     #: 4 — спящий режим, 8 — простой.
     FLAG_IDLE = 8
@@ -239,8 +236,7 @@ class InhibitKeeper:
                 cookie = saver.Inhibit("activity-renew", self.REASON)
             except dbus.DBusException as exc:
                 raise JigglerUnavailable(
-                    "не удалось взять ингибит простоя: ни org.gnome.SessionManager, "
-                    f"ни org.freedesktop.ScreenSaver не отвечают ({exc.get_dbus_name() or exc})"
+                    tr("inhibit_failed", error=exc.get_dbus_name() or exc)
                 ) from exc
             self._release = lambda: saver.Uninhibit(cookie)
             self._via = "org.freedesktop.ScreenSaver"
@@ -283,7 +279,7 @@ class ActivityKeeper:
         self.notes = []
         if self.mode in self.INHIBIT_MODES:
             self._inhibit.acquire()
-            self.notes.append(f"ингибит простоя взят через {self._inhibit.via}")
+            self.notes.append(tr("journal_inhibit_acquired", via=self._inhibit.via))
         if self.mode in self.MOUSE_MODES:
             self._jiggler = UinputJiggler(self.hold_ms)
             ok, detail = self._jiggler.self_test()

@@ -45,7 +45,12 @@ class SchedulerTest(unittest.TestCase):
     def test_locked_pauses(self) -> None:
         decision = self.decide(9999, locked=True)
         self.assertFalse(decision.jiggle)
-        self.assertIn("заблокирован", decision.reason)
+        self.assertEqual(decision.reason_key, "locked")
+
+    def test_reason_keys_describe_the_decision(self) -> None:
+        self.assertEqual(self.decide(30).reason_key, "wait")
+        self.assertEqual(self.decide(120).reason_key, "idle")
+        self.assertEqual(self.decide(120).reason_value, 120.0)
 
     def test_locked_jiggles_when_pause_disabled(self) -> None:
         self.scheduler.set_pause_when_locked(False)

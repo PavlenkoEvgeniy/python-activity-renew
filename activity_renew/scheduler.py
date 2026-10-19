@@ -16,11 +16,16 @@ MIN_TICK_SECONDS = 0.5
 
 @dataclass(frozen=True)
 class Decision:
-    """Что делать на этом такте."""
+    """Что делать на этом такте.
+
+    ``reason_key`` — машинный код причины (``stopped``, ``locked``, ``idle``,
+    ``wait``); текст на нужном языке собирает интерфейс.
+    """
 
     jiggle: bool
     seconds_until_next: float
-    reason: str
+    reason_key: str
+    reason_value: float = 0.0
 
 
 class Scheduler:
@@ -64,10 +69,10 @@ class Scheduler:
 
     def decide(self, *, running: bool, idle_seconds: float, locked: bool) -> Decision:
         if not running:
-            return Decision(False, 0.0, "остановлено")
+            return Decision(False, 0.0, "stopped")
 
         if locked and self._pause_when_locked:
-            return Decision(False, MIN_TICK_SECONDS, "экран заблокирован — пауза")
+            return Decision(False, MIN_TICK_SECONDS, "locked")
 
         now = self._clock()
         if self._last_jiggle is None:
@@ -81,10 +86,7 @@ class Scheduler:
             wait = max(wait, self._interval - since_last)
 
         if idle_seconds >= self._interval and wait <= 0.0:
-            return Decision(
-                True, 0.0,
-                f"простой {idle_seconds:.0f} с ≥ {self._interval} с",
-            )
+            return Decision(True, 0.0, "idle", float(idle_seconds))
 
         wait = max(wait, MIN_TICK_SECONDS)
-        return Decision(False, wait, f"до дёрганья {wait:.0f} с")
+        return Decision(False, wait, "wait", wait)

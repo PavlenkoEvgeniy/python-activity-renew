@@ -6,8 +6,10 @@ import unittest
 from pathlib import Path
 
 from activity_renew import config as config_module
+from activity_renew import i18n
 from activity_renew.config import (
     DEFAULT_INTERVAL,
+    DEFAULT_LANGUAGE,
     MAX_INTERVAL,
     MIN_INTERVAL,
     Config,
@@ -24,12 +26,14 @@ class LoadTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
+        i18n.set_language(DEFAULT_LANGUAGE)
 
     def test_missing_file_gives_defaults_without_complaints(self) -> None:
         cfg, warnings = load(self.path)
         self.assertEqual(cfg.interval_seconds, DEFAULT_INTERVAL)
         self.assertEqual(cfg.mode, "uinput")
         self.assertTrue(cfg.pause_when_locked)
+        self.assertEqual(cfg.language, DEFAULT_LANGUAGE)
         self.assertEqual(warnings, [])
 
     def test_broken_json_gives_defaults_and_warning(self) -> None:
@@ -41,7 +45,7 @@ class LoadTest(unittest.TestCase):
 
     def test_round_trip(self) -> None:
         cfg = Config(interval_seconds=45, mode="both", pause_when_locked=False,
-                     jiggle_hold_ms=80, log_limit=5)
+                     jiggle_hold_ms=80, log_limit=5, language="ru")
         save(cfg, self.path)
         loaded, warnings = load(self.path)
         self.assertEqual(loaded.interval_seconds, 45)
@@ -49,7 +53,19 @@ class LoadTest(unittest.TestCase):
         self.assertFalse(loaded.pause_when_locked)
         self.assertEqual(loaded.jiggle_hold_ms, 80)
         self.assertEqual(loaded.log_limit, 5)
+        self.assertEqual(loaded.language, "ru")
+        self.assertEqual(i18n.get_language(), "ru")
         self.assertEqual(warnings, [])
+
+    def test_russian_config_localizes_warnings(self) -> None:
+        self.path.write_text(
+            json.dumps({"language": "ru", "interval_seconds": "две минуты"}),
+            encoding="utf-8",
+        )
+        cfg, warnings = load(self.path)
+        self.assertEqual(cfg.language, "ru")
+        self.assertTrue(warnings)
+        self.assertIn("интервал", warnings[0])
 
     def test_save_creates_parent_directory(self) -> None:
         nested = Path(self.tmp.name) / "глубоко" / "config.json"
@@ -86,6 +102,16 @@ class ValidationTest(unittest.TestCase):
     def test_unknown_mode_falls_back(self) -> None:
         cfg, warnings = from_dict({"mode": "телепортация"})
         self.assertEqual(cfg.mode, "uinput")
+        self.assertTrue(warnings)
+
+    def test_language_is_kept(self) -> None:
+        cfg, warnings = from_dict({"language": "ru"})
+        self.assertEqual(cfg.language, "ru")
+        self.assertEqual(warnings, [])
+
+    def test_unknown_language_falls_back(self) -> None:
+        cfg, warnings = from_dict({"language": "fr"})
+        self.assertEqual(cfg.language, DEFAULT_LANGUAGE)
         self.assertTrue(warnings)
 
     def test_hold_ms_is_clamped(self) -> None:

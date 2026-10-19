@@ -11,6 +11,7 @@ from . import __version__
 from . import config as config_module
 from . import single_instance
 from .gui import run as run_gui
+from .i18n import tr
 from .idle import GnomeIdleSource, IdleSourceUnavailable
 
 
@@ -18,20 +19,21 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="activity-renew",
         description=(
-            "Дёргает мышь на 1 пиксель и возвращает обратно, если за компьютером "
-            "нет ввода дольше заданного времени."
+            "Moves the mouse 1 pixel and back when there has been no input "
+            "for longer than the configured interval."
         ),
     )
     parser.add_argument(
         "--version", action="version", version=f"activity-renew {__version__}"
     )
     parser.add_argument(
-        "--config", metavar="ПУТЬ", help="файл конфигурации (по умолчанию в ~/.config)"
+        "--config", metavar="PATH",
+        help="configuration file (default: ~/.config)",
     )
     parser.add_argument(
         "--check",
         action="store_true",
-        help="проверить источники простоя и виртуальную мышь, затем выйти",
+        help="check the idle source and the virtual mouse, then exit",
     )
     return parser.parse_args(argv)
 
@@ -55,25 +57,25 @@ def _run_check(source: GnomeIdleSource, cfg: config_module.Config) -> int:
     from .jiggler import ActivityKeeper, JigglerUnavailable
 
     print(f"activity-renew {__version__}")
-    print(f"источник простоя: {source.describe()}")
+    print(tr("check_idle_source", description=source.describe()))
 
     keeper = ActivityKeeper("uinput", cfg.jiggle_hold_ms)
     try:
         notes = keeper.start()
     except JigglerUnavailable as exc:
-        print(f"виртуальная мышь: НЕ РАБОТАЕТ — {exc}")
+        print(tr("check_mouse_failed", error=exc))
         return 1
     finally:
         keeper.stop()
     for note in notes:
-        print(f"виртуальная мышь: {note}")
+        print(tr("check_mouse_note", note=note))
 
     keeper = ActivityKeeper("inhibit", cfg.jiggle_hold_ms)
     try:
         keeper.start()
-        print("ингибит простоя: доступен")
+        print(tr("check_inhibit_available"))
     except JigglerUnavailable as exc:
-        print(f"ингибит простоя: НЕ РАБОТАЕТ — {exc}")
+        print(tr("check_inhibit_failed", error=exc))
         return 1
     finally:
         keeper.stop()
@@ -88,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         source = GnomeIdleSource()
     except IdleSourceUnavailable as exc:
-        return _report_error("Нет источника простоя", str(exc))
+        return _report_error(tr("error_no_idle_title"), str(exc))
 
     if args.check:
         return _run_check(source, cfg)
@@ -96,9 +98,8 @@ def main(argv: list[str] | None = None) -> int:
     lock = single_instance.acquire()
     if lock is None:
         return _report_error(
-            "Уже запущено",
-            "Вторая копия дёргала бы мышь вдвое чаще и спорила за файл "
-            "конфигурации. Найдите уже открытое окно activity-renew.",
+            tr("error_already_running_title"),
+            tr("error_already_running_message"),
         )
 
     try:

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import dbus
 
+from .i18n import tr
+
 IDLE_NAME = "org.gnome.Mutter.IdleMonitor"
 IDLE_PATH = "/org/gnome/Mutter/IdleMonitor/Core"
 IDLE_IFACE = "org.gnome.Mutter.IdleMonitor"
@@ -38,11 +40,10 @@ class GnomeIdleSource:
             idle.GetIdletime()  # проверка, что сервис жив, а не только на шине
         except dbus.DBusException as exc:
             raise IdleSourceUnavailable(
-                "счётчик простоя GNOME недоступен: "
-                f"{exc.get_dbus_name() or type(exc).__name__}.\n"
-                "Приложение рассчитано на сессию GNOME (Wayland или X11) и берёт "
-                "простой из org.gnome.Mutter.IdleMonitor. Без него непонятно, "
-                "когда дёргать, поэтому работа не начинается."
+                tr(
+                    "idle_unavailable",
+                    error=exc.get_dbus_name() or type(exc).__name__,
+                )
             ) from exc
 
         self._bus = bus
@@ -57,7 +58,7 @@ class GnomeIdleSource:
             return int(self._idle.GetIdletime()) / 1000.0
         except dbus.DBusException as exc:
             raise IdleSourceUnavailable(
-                f"счётчик простоя перестал отвечать: {exc.get_dbus_name() or exc}"
+                tr("idle_stopped", error=exc.get_dbus_name() or exc)
             ) from exc
 
     def is_locked(self) -> bool:
@@ -93,5 +94,6 @@ class GnomeIdleSource:
         try:
             locked = self.is_locked()
         except Exception as exc:  # pragma: no cover - диагностика
-            return f"простой {self.idle_seconds():.1f} с; состояние блокировки неизвестно: {exc}"
-        return f"простой {self.idle_seconds():.1f} с; экран {'заблокирован' if locked else 'не заблокирован'}"
+            return tr("describe_idle_unknown", seconds=self.idle_seconds(), error=exc)
+        state = tr("screen_locked" if locked else "screen_unlocked")
+        return tr("describe_idle", seconds=self.idle_seconds(), state=state)

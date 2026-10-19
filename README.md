@@ -1,55 +1,59 @@
 # activity-renew
 
-Дёргает мышь на 1 пиксель и возвращает обратно, если за компьютером давно нет
-ввода — чтобы сессия не считалась простаивающей.
+Moves the mouse by 1 pixel and back when there has been no input for a while,
+so the session is not considered idle.
 
-Окно на tkinter: интервал, пуск/останов, режим, состояние и журнал событий.
+The tkinter window lets you set the interval, start and stop the simulation,
+pick a mode, switch the interface language (English or Russian) and watch the
+event log. **Help → About** shows the version and a short description in a
+dialog centered over the main window.
 
-## Зачем всё так сложно: почему не XTest
+## Why this is not just XTest
 
-Очевидное решение — `xdotool`, `pynput` или `pyautogui` — **на Wayland не
-работает**. Курсор они двигают, но счётчик простоя Mutter'а при этом не
-сбрасывается: проверено на чистой сессии, где простой рос 4694 мс → 5785 мс
-сквозь дёрганье, то есть рост не прерывался. Сессия продолжала считать себя
-простаивающей.
+The obvious approach — `xdotool`, `pynput` or `pyautogui` — **does not work on
+Wayland**. They move the cursor, but they do not reset Mutter's idle counter.
+This was verified on a clean session: idle time kept growing from 4694 ms to
+5785 ms across synthetic movements, so the session still considered itself
+idle.
 
-Поэтому здесь два других механизма:
+That is why there are two other mechanisms:
 
-- **`uinput`** — создаём настоящее виртуальное устройство ввода
-  (`/dev/uinput`). Композитор видит его как железо, так что событие
-  засчитывается и операционной системой, и приложениями. Курсор реально
-  сдвигается на пиксель и возвращается.
-- **`inhibit`** — просим сессию не засыпать через D-Bus
-  (`org.gnome.SessionManager.Inhibit`, флаг 8 = простой). Мышь не двигается
-  вообще, зато работает без единой настройки прав.
+- **`uinput`** — creates a real virtual input device through `/dev/uinput`.
+  The compositor sees it as hardware, so the event counts for both the
+  operating system and applications. The cursor actually moves one pixel and
+  comes back.
+- **`inhibit`** — asks the session not to go idle through D-Bus
+  (`org.gnome.SessionManager.Inhibit`, flag 8 = idle). The mouse does not move
+  at all, and no permission setup is needed.
 
-Простой определяется через `org.gnome.Mutter.IdleMonitor` — в Wayland-сессии
-это единственный авторитетный источник: расширения XScreenSaver нет, а свои
-глобальные хуки там невозможны в принципе.
+Idle time comes from `org.gnome.Mutter.IdleMonitor`. In a Wayland session this
+is the only authoritative source: the XScreenSaver extension is unavailable,
+and global input hooks are impossible by design.
 
-## Установка
+## Installation
 
-Три способа, по убыванию удобства. Оба файла и `SHA256SUMS` лежат в разделе
-Releases и собираются автоматически при публикации релиза
-(`.github/workflows/release.yml`).
+Three options, from most convenient to least. Both artifacts and
+`SHA256SUMS` are attached to GitHub Releases and built automatically when a
+release is published (`.github/workflows/release.yml`).
 
-**Пакет .deb** (Ubuntu/Debian). Подтягивает зависимости и сам ставит правило
-доступа к `/dev/uinput` — режим `uinput` работает сразу, без ручных шагов:
+**.deb package** (Ubuntu/Debian). It pulls in the dependencies and installs the
+`/dev/uinput` access rule itself, so the `uinput` mode works right away with no
+manual steps:
 
 ```bash
-sudo apt install ./activity-renew_0.1.0_all.deb
+sudo apt install ./activity-renew_0.2.0_all.deb
 activity-renew
 ```
 
-**Готовый бинарник.** Один файл, python и библиотеки внутри. Из зависимостей
-остаются `xdotool` и правило udev (раздел ниже):
+**Standalone binary.** A single file with Python and the libraries inside. The
+remaining dependencies are `xdotool` and the udev rule (see below):
 
 ```bash
 chmod +x activity-renew
 ./activity-renew
 ```
 
-**Из исходников.** Если хочется править код:
+**From source.** If you want to modify the code:
 
 ```bash
 git clone https://github.com/PavlenkoEvgeniy/python-activity-renew.git
@@ -57,27 +61,27 @@ cd python-activity-renew
 python3 -m activity_renew
 ```
 
-## Требования
+## Requirements
 
-Сессия GNOME (Wayland или X11). Всё нужное уже есть в системе, ставить из pip
-ничего не надо:
+A GNOME session (Wayland or X11). Everything needed is already in the system;
+nothing has to be installed from pip:
 
-| Что | Зачем | Пакет |
+| What | Why | Package |
 |---|---|---|
 | Python 3 | | `python3` |
-| tkinter | окно | `python3-tk` |
-| dbus-python | простой, блокировка, ингибит | `python3-dbus` |
-| evdev | виртуальная мышь | `python3-evdev` |
-| xdotool | позиция курсора и размер экрана | `xdotool` |
+| tkinter | window | `python3-tk` |
+| dbus-python | idle time, lock state, inhibit | `python3-dbus` |
+| evdev | virtual mouse | `python3-evdev` |
+| xdotool | cursor position and screen size | `xdotool` |
 
-## Разовая настройка для режима `uinput`
+## One-time setup for `uinput` mode
 
-**Если ставили .deb — раздел можно пропустить**: правило уже установлено и
-применено при установке пакета.
+**If you installed the .deb, skip this section**: the rule is already installed
+and applied by the package.
 
-Виртуальная мышь создаётся всегда, но её узел `/dev/input/eventN` получает
-права `root:input` без ACL — композитор такое устройство не читает, и события
-уходят в пустоту. Нужно один раз разрешить доступ:
+The virtual mouse is always created, but its `/dev/input/eventN` node gets
+`root:input` permissions without an ACL. The compositor does not read such a
+device, and the events go nowhere. Grant access once:
 
 ```bash
 sudo tee /etc/udev/rules.d/99-activity-renew.rules >/dev/null <<'EOF'
@@ -86,91 +90,103 @@ EOF
 sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=input
 ```
 
-Правило привязано к имени устройства, поэтому доступ к настоящим клавиатурам и
-мышам не расширяется (в отличие от добавления пользователя в группу `input`).
+The rule matches the device name, so access to real keyboards and mice is not
+widened (unlike adding the user to the `input` group).
 
-Проверить результат:
+Check the result:
 
 ```bash
 python3 -m activity_renew --check
 ```
 
-Команда двигает курсор на 25 px и обратно — если он не сдвинулся, вы увидите
-ровно эту причину, а не молчаливое «вроде работает».
+The command moves the cursor 25 px and back. If it does not move, you will see
+exactly that reason instead of a silent “seems to work”.
 
-## Запуск
+## Running
 
 ```bash
-cd /путь/к/python-activity-renew
+cd /path/to/python-activity-renew
 python3 -m activity_renew
 ```
 
-Одновременно может работать только одна копия: вторая покажет «уже запущено» и
-выйдет. Замок — `flock` в `$XDG_RUNTIME_DIR`, снимается ядром сам, чистить
-нечего.
+Only one copy can run at a time: the second one shows “Already running” and
+exits. The lock is a `flock` in `$XDG_RUNTIME_DIR`; the kernel releases it, so
+there is nothing to clean up.
 
-## Режимы
+## Modes
 
-| Режим | Что делает | Когда нужен |
+| Mode | What it does | When to use it |
 |---|---|---|
-| `uinput` (по умолчанию) | дёргает мышь на 1 px и возвращает | обычный случай: нужны настоящие события ввода |
-| `inhibit` | постоянно держит ингибит простоя | достаточно, чтобы экран не гас и не блокировался |
-| `both` | и то и другое | страховка: ингибит для ОС, дёрганье — для приложений |
+| `uinput` (default) | moves the mouse 1 px and back | the usual case: real input events are needed |
+| `inhibit` | holds an idle inhibit continuously | enough to keep the screen from blanking or locking |
+| `both` | both at once | belt and braces: inhibit for the OS, mouse movement for applications |
 
-В режиме `inhibit` поле интервала неактивно: экран не гаснет постоянно, поэтому
-простой ни на что не влияет.
+In `inhibit` mode the interval field is disabled: the screen never blanks, so
+idle time does not affect anything.
 
-## Настройки
+## Interface language
 
-Файл `~/.config/activity-renew/config.json`, создаётся при первом изменении.
-Правки применяются на лету. Незнакомые ключи сохраняются, поэтому файл можно
-править руками.
+The interface is in English by default. Pick **Русский** in the **Language**
+box to switch to Russian; the change applies immediately and is stored in the
+configuration file. The About dialog and all status and log messages follow the
+selected language.
 
-| Ключ | По умолчанию | Смысл |
+## Settings
+
+The file is `~/.config/activity-renew/config.json` and is created on the first
+change. Edits apply on the fly. Unknown keys are preserved, so the file is safe
+to edit by hand.
+
+| Key | Default | Meaning |
 |---|---|---|
-| `interval_seconds` | `120` | простой, после которого дёргать (5…86400) |
-| `mode` | `"uinput"` | `uinput`, `inhibit` или `both` |
-| `pause_when_locked` | `true` | пауза, пока экран заблокирован |
-| `jiggle_hold_ms` | `60` | пауза между уходом и возвратом, мс |
-| `log_limit` | `20` | сколько событий держать в журнале |
+| `language` | `"en"` | interface language: `en` or `ru` |
+| `interval_seconds` | `120` | idle time after which to jiggle (5…86400) |
+| `mode` | `"uinput"` | `uinput`, `inhibit` or `both` |
+| `pause_when_locked` | `true` | pause while the screen is locked |
+| `jiggle_hold_ms` | `60` | delay between moving away and back, ms |
+| `log_limit` | `20` | how many events to keep in the log |
 
-Значения вне диапазона зажимаются, а в журнал окна попадает замечание.
+Out-of-range values are clamped, and a note appears in the window log.
 
-## Автозапуск при входе
+## Autostart at login
 
-`~/.config/autostart/activity-renew.desktop` (подставьте свой путь):
+`~/.config/autostart/activity-renew.desktop` (use your own path):
 
 ```ini
 [Desktop Entry]
 Type=Application
 Name=activity-renew
-Comment=Дёргает мышь, чтобы сессия не считалась простаивающей
+Comment=Moves the mouse so the session is not considered idle
 Exec=python3 -m activity_renew
 Path=/home/p3s/Projects/my/python-activity-renew
 Terminal=false
 X-GNOME-Autostart-enabled=true
 ```
 
-## Тесты
+## Tests
 
 ```bash
 python3 -m unittest discover -s tests -t .
 ```
 
-Проверяется чистая логика — решение «пора дёргать» на подменяемых часах и
-разбор конфига. GUI, D-Bus и evdev тестами не покрыты: их проверяет `--check`
-на живой сессии.
+The tests cover pure logic: the “time to jiggle” decision on a fake clock,
+configuration parsing and validation, and interface translations. The GUI,
+D-Bus and evdev are not covered by tests; `--check` verifies them on a live
+session.
 
-## Известные ограничения
+## Known limitations
 
-- **Только GNOME.** Источник простоя — Mutter; на KDE, Sway и прочих рабочая
-  среда не заведётся, приложение откажется стартовать с внятным текстом.
-- **Дрейф у кромки экрана.** Позиция курсора читается через XWayland-зеркало
-  (`xdotool`). Если `xdotool` не установлен, направление выбирается случайно, и
-  у самой кромки экрана курсор может за дёрганье уехать на пиксель.
-- **Сквозная проверка `uinput` не завершена.** Механизм проверен не до конца:
-  на момент написания udev-правило ещё не было установлено, поэтому сброс
-  счётчика простоя настоящей виртуальной мышью не подтверждён — только
-  отсутствие сброса у XTest. После установки правила запустите `--check`.
-- **Приложение не запускает само себя** после перезагрузки: автозапуск — врозь,
-  рецепт выше.
+- **GNOME only.** The idle source is Mutter; on KDE, Sway and others the desktop
+  integration will not work, and the application refuses to start with a clear
+  message.
+- **Drift at the screen edge.** The cursor position is read through the
+  XWayland mirror (`xdotool`). If `xdotool` is not installed, the direction is
+  chosen at random, and right at the screen edge a jiggle can move the cursor
+  by one pixel.
+- **End-to-end `uinput` verification is incomplete.** The mechanism has not
+  been fully confirmed: when this was written the udev rule had not been
+  installed yet, so resetting the idle counter with a real virtual mouse was
+  not proven — only that XTest does not reset it. After installing the rule,
+  run `--check`.
+- **The application does not start itself** after a reboot: use the autostart
+  recipe above.

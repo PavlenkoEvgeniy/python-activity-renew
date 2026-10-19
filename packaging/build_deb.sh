@@ -66,10 +66,10 @@ Architecture: all
 Depends: python3 (>= 3.10), python3-tk, python3-dbus, python3-evdev, xdotool
 Installed-Size: $SIZE
 Maintainer: $MAINTAINER
-Description: имитация активности, чтобы сессия не считалась простаивающей
- Дергает мышь на 1 пиксель и возвращает обратно, если за компьютером давно
- нет ввода. Отдельно умеет просить сессию GNOME не засыпать через D-Bus.
- Окно на tkinter.
+Description: activity simulation so the session is not considered idle
+ Moves the mouse 1 pixel and back when there has been no input for a while.
+ It can also ask the GNOME session not to idle through D-Bus.
+ The window is built with tkinter.
 EOF
 
 mkdir -p "$OUT"

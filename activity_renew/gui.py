@@ -1,8 +1,13 @@
-"""Окно на tkinter: интервал, пуск/останов, режим, состояние и журнал.
+"""Окно на tkinter: интервал, пуск/останов, режим, язык, состояние и журнал.
 
 Дёрганье выполняется в отдельном потоке: внутри него спят и зовут внешний
 ``xdotool``, а окно замирать не должно. Обратно в поток tkinter результаты
 возвращаются через очередь — tkinter не любит обращения из чужих потоков.
+
+Смена языка перестраивает окно целиком: так не приходится держать таблицу
+«виджет → ключ перевода» и обновлять её в двух местах. Журнал хранится
+структурно (ключ + параметры), поэтому после перестройки он перерисовывается
+на новом языке.
 """
 
 from __future__ import annotations
@@ -10,24 +15,27 @@ from __future__ import annotations
 import queue
 import threading
 import tkinter as tk
+import tkinter.font as tkfont
 from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
 
+from . import __version__
 from . import config as config_module
-from .config import MAX_INTERVAL, MIN_INTERVAL, MODE_TITLES, MODES, Config
+from . import i18n
+from .config import MAX_INTERVAL, MIN_INTERVAL, MODES, Config
+from .i18n import tr
 from .idle import GnomeIdleSource, IdleSourceUnavailable
 from .jiggler import ActivityKeeper, JigglerUnavailable
 from .scheduler import Decision, Scheduler
 
 TICK_MS = 1000
-WINDOW_TITLE = "activity-renew — имитация активности"
 
-DIRECTION_TITLES = {
-    (0, -1): "вверх",
-    (0, 1): "вниз",
-    (-1, 0): "влево",
-    (1, 0): "вправо",
+DIRECTION_KEYS = {
+    (0, -1): "direction_up",
+    (0, 1): "direction_down",
+    (-1, 0): "direction_left",
+    (1, 0): "direction_right",
 }
 
 
@@ -54,19 +62,25 @@ class App:
         self.running = False
         self.busy = False
         self.jiggle_count = 0
+        self.journal_visible = True
         #: Текст ошибки, который переживает остановку и не даёт такту затереть себя.
         self.status_override: str | None = None
         self.events: queue.Queue = queue.Queue()
+        #: Записи журнала: (метка времени, ключ перевода или None, параметры/текст).
+        self.journal_entries: list[tuple[str, str | None, object]] = []
 
         self._build()
         for note in self.startup_warnings:
-            self._journal(f"замечание к конфигу: {note}")
+            self._journal_raw(tr("journal_config_note", note=note))
+        self._tick_job: str | None = self.root.after(TICK_MS, self._tick)
 
     # ── построение окна ────────────────────────────────────────────────────
 
     def _build(self) -> None:
-        self.root.title(WINDOW_TITLE)
-        self.root.minsize(520, 240)
+        self.root.title(tr("window_title"))
+        self.root.minsize(560, 320)
+
+        self._build_menu()
 
         outer = ttk.Frame(self.root, padding=12)
         outer.grid(row=0, column=0, sticky="nsew")
@@ -74,66 +88,104 @@ class App:
         self.root.rowconfigure(0, weight=1)
         outer.columnconfigure(1, weight=1)
 
-        ttk.Label(outer, text="Дёргать после простоя, с:").grid(
+        ttk.Label(outer, text=tr("interval_label")).grid(
             row=0, column=0, sticky="w"
         )
         self.interval_var = tk.StringVar(value=str(self.cfg.interval_seconds))
         self.interval_entry = ttk.Entry(outer, textvariable=self.interval_var, width=10)
         self.interval_entry.grid(row=0, column=1, sticky="w", padx=(8, 8))
-        ttk.Button(outer, text="Применить", command=self._apply_interval).grid(
+        ttk.Button(outer, text=tr("button_apply"), command=self._apply_interval).grid(
             row=0, column=2, sticky="w"
         )
 
-        self.toggle_button = ttk.Button(outer, text="Старт", command=self._toggle)
+        self.toggle_button = ttk.Button(
+            outer,
+            text=tr("button_stop") if self.running else tr("button_start"),
+            command=self._toggle,
+        )
         self.toggle_button.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(12, 8))
 
-        mode_box = ttk.LabelFrame(outer, text="Режим", padding=8)
+        mode_box = ttk.LabelFrame(outer, text=tr("mode_box"), padding=8)
         mode_box.grid(row=2, column=0, columnspan=3, sticky="ew")
         self.mode_var = tk.StringVar(value=self.cfg.mode)
         for index, mode in enumerate(MODES):
             ttk.Radiobutton(
                 mode_box,
-                text=MODE_TITLES[mode],
+                text=tr(f"mode_{mode}"),
                 value=mode,
                 variable=self.mode_var,
                 command=self._on_mode_change,
             ).grid(row=0, column=index, sticky="w", padx=(0, 16))
 
+        language_box = ttk.LabelFrame(outer, text=tr("language_box"), padding=8)
+        language_box.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        self.language_var = tk.StringVar(value=i18n.get_language())
+        for index, language in enumerate(i18n.LANGUAGES):
+            ttk.Radiobutton(
+                language_box,
+                text=i18n.language_name(language),
+                value=language,
+                variable=self.language_var,
+                command=self._on_language_change,
+            ).grid(row=0, column=index, sticky="w", padx=(0, 16))
+
         self.pause_var = tk.BooleanVar(value=self.cfg.pause_when_locked)
         ttk.Checkbutton(
             outer,
-            text="Пауза, когда экран заблокирован",
+            text=tr("pause_check"),
             variable=self.pause_var,
             command=self._on_pause_change,
-        ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        ).grid(row=4, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
-        self.journal_var = tk.BooleanVar(value=True)
+        self.journal_var = tk.BooleanVar(value=self.journal_visible)
         ttk.Checkbutton(
             outer,
-            text="Показывать журнал событий",
+            text=tr("journal_check"),
             variable=self.journal_var,
             command=self._on_journal_toggle,
-        ).grid(row=4, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        ).grid(row=5, column=0, columnspan=3, sticky="w", pady=(4, 0))
 
-        self.status_var = tk.StringVar(value="остановлено")
+        self.status_var = tk.StringVar(
+            value=self.status_override or tr("status_stopped")
+        )
         ttk.Label(outer, textvariable=self.status_var, foreground="#333").grid(
-            row=5, column=0, columnspan=3, sticky="w", pady=(10, 0)
+            row=6, column=0, columnspan=3, sticky="w", pady=(10, 0)
         )
 
-        self.journal_frame = ttk.LabelFrame(outer, text="Последние события", padding=6)
-        self.journal_frame.grid(row=6, column=0, columnspan=3, sticky="nsew", pady=(8, 0))
-        outer.rowconfigure(6, weight=1)
+        self.journal_frame = ttk.LabelFrame(
+            outer, text=tr("journal_box"), padding=6
+        )
+        self.journal_frame.grid(row=7, column=0, columnspan=3, sticky="nsew", pady=(8, 0))
+        outer.rowconfigure(7, weight=1)
         self.journal = tk.Listbox(self.journal_frame, height=8, activestyle="none")
         self.journal.grid(row=0, column=0, sticky="nsew")
         self.journal_frame.columnconfigure(0, weight=1)
         self.journal_frame.rowconfigure(0, weight=1)
-        scroll = ttk.Scrollbar(self.journal_frame, orient="vertical", command=self.journal.yview)
+        scroll = ttk.Scrollbar(
+            self.journal_frame, orient="vertical", command=self.journal.yview
+        )
         scroll.grid(row=0, column=1, sticky="ns")
         self.journal.configure(yscrollcommand=scroll.set)
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._refresh_mode_sensitivity()
-        self.root.after(TICK_MS, self._tick)
+        self._render_journal()
+        if not self.journal_visible:
+            self.journal_frame.grid_remove()
+
+    def _build_menu(self) -> None:
+        menubar = tk.Menu(self.root)
+        help_menu = tk.Menu(menubar, tearoff=False)
+        help_menu.add_command(label=tr("menu_about"), command=self._show_about)
+        menubar.add_cascade(label=tr("menu_help"), menu=help_menu)
+        self.root.configure(menu=menubar)
+
+    def _rebuild(self) -> None:
+        """Перестроить окно после смены языка, сохранив состояние."""
+        self.root.configure(menu="")
+        for child in self.root.winfo_children():
+            child.destroy()
+        self._build()
 
     # ── реакция на элементы управления ─────────────────────────────────────
 
@@ -143,7 +195,9 @@ class App:
             value = int(raw)
         except ValueError:
             messagebox.showerror(
-                "Не число", f"«{raw}» не похоже на число секунд.", parent=self.root
+                tr("error_not_number_title"),
+                tr("error_not_number_message", value=raw),
+                parent=self.root,
             )
             self.interval_var.set(str(self.scheduler.interval_seconds))
             return
@@ -151,22 +205,27 @@ class App:
         clamped = min(max(value, MIN_INTERVAL), MAX_INTERVAL)
         if clamped != value:
             messagebox.showwarning(
-                "Интервал вне диапазона",
-                f"Допустимо от {MIN_INTERVAL} до {MAX_INTERVAL} с — поставил {clamped}.",
+                tr("interval_out_of_range_title"),
+                tr(
+                    "interval_out_of_range_message",
+                    min=MIN_INTERVAL,
+                    max=MAX_INTERVAL,
+                    value=clamped,
+                ),
                 parent=self.root,
             )
         self.interval_var.set(str(clamped))
         self.scheduler.set_interval(clamped)
         self.cfg.interval_seconds = clamped
         self._save()
-        self._journal(f"интервал изменён на {clamped} с")
+        self._journal("journal_interval_changed", seconds=clamped)
 
     def _on_pause_change(self) -> None:
         value = bool(self.pause_var.get())
         self.scheduler.set_pause_when_locked(value)
         self.cfg.pause_when_locked = value
         self._save()
-        self._journal("пауза при блокировке " + ("включена" if value else "выключена"))
+        self._journal("journal_pause_on" if value else "journal_pause_off")
 
     def _on_mode_change(self) -> None:
         mode = self.mode_var.get()
@@ -182,12 +241,26 @@ class App:
             self.running = False
 
         self.keeper.mode = mode
-        self._journal(f"режим: {MODE_TITLES.get(mode, mode)}")
+        self._journal("journal_mode_changed", mode=tr(f"mode_{mode}"))
         if was_running:
             self._start()
 
+    def _on_language_change(self) -> None:
+        language = self.language_var.get()
+        if language not in i18n.LANGUAGES or language == i18n.get_language():
+            return
+
+        i18n.set_language(language)
+        self.cfg.language = language
+        self._save()
+        self._rebuild()
+        self._journal(
+            "journal_language_changed", language=i18n.language_name(language)
+        )
+
     def _on_journal_toggle(self) -> None:
-        if self.journal_var.get():
+        self.journal_visible = bool(self.journal_var.get())
+        if self.journal_visible:
             self.journal_frame.grid()
         else:
             self.journal_frame.grid_remove()
@@ -214,23 +287,23 @@ class App:
             notes = self.keeper.start()
         except JigglerUnavailable as exc:
             self.keeper.stop()
-            self._journal(f"не удалось запустить: {exc}")
-            messagebox.showerror("Режим не запустился", str(exc), parent=self.root)
+            self._journal("journal_start_failed", error=exc)
+            messagebox.showerror(tr("mode_failed_title"), str(exc), parent=self.root)
             return
 
         self.running = True
         self.jiggle_count = 0
         self.status_override = None
         self.scheduler.mark_jiggled()  # отсчёт интервала начинается с пуска
-        self.toggle_button.configure(text="Стоп")
+        self.toggle_button.configure(text=tr("button_stop"))
         for note in notes:
-            self._journal(note)
+            self._journal_raw(note)
 
     def _stop(self) -> None:
         self.running = False
         self.keeper.stop()
-        self.toggle_button.configure(text="Старт")
-        self._journal("остановлено")
+        self.toggle_button.configure(text=tr("button_start"))
+        self._journal("journal_stopped")
 
     # ── основной такт ──────────────────────────────────────────────────────
 
@@ -243,16 +316,16 @@ class App:
                 else:
                     self.source.idle_seconds()  # держим связь живой и ловим отказ
                     self.status_var.set(
-                        f"работает · ингибит простоя активен · срабатываний {self.jiggle_count}"
+                        tr("status_running_inhibit", count=self.jiggle_count)
                     )
             else:
-                self.status_var.set(self.status_override or "остановлено")
+                self.status_var.set(self.status_override or tr("status_stopped"))
         except IdleSourceUnavailable as exc:
             # Такт продолжает жить: после отказа источник может ожить, и «Старт»
             # должен снова работать. Повтора окна с ошибкой не будет — _fail
             # снимает признак «работает», а запросы делает только он.
             self._fail(str(exc))
-        self.root.after(TICK_MS, self._tick)
+        self._tick_job = self.root.after(TICK_MS, self._tick)
 
     def _tick_with_mouse(self) -> None:
         idle = self.source.idle_seconds()
@@ -260,15 +333,30 @@ class App:
         decision = self.scheduler.decide(running=True, idle_seconds=idle, locked=locked)
         self.status_var.set(self._status_text(idle, decision))
         if decision.jiggle and not self.busy:
-            self._start_jiggle(decision.reason)
+            self._start_jiggle(self._reason_text(decision))
+
+    def _reason_text(self, decision: Decision) -> str:
+        if decision.reason_key == "locked":
+            return tr("reason_locked")
+        if decision.reason_key == "idle":
+            return tr(
+                "reason_idle",
+                idle=decision.reason_value,
+                interval=self.scheduler.interval_seconds,
+            )
+        if decision.reason_key == "wait":
+            return tr("reason_wait", wait=decision.reason_value)
+        return tr("status_stopped")
 
     def _status_text(self, idle: float, decision: Decision) -> str:
-        text = (
-            f"работает · простой {idle:.0f} с · {decision.reason} "
-            f"· срабатываний {self.jiggle_count}"
+        text = tr(
+            "status_running_mouse",
+            idle=idle,
+            reason=self._reason_text(decision),
+            count=self.jiggle_count,
         )
         if self.cfg.small_interval:
-            text += f" · ⚠ интервал меньше {config_module.SMALL_INTERVAL} с"
+            text += tr("status_small_interval", seconds=config_module.SMALL_INTERVAL)
         return text
 
     def _start_jiggle(self, reason: str) -> None:
@@ -292,42 +380,131 @@ class App:
 
             self.busy = False
             if kind == "error":
-                self._fail(f"дёрганье не удалось: {error}")
+                self._fail(tr("journal_jiggle_failed", error=error))
                 return
 
             self.scheduler.mark_jiggled()
             self.jiggle_count += 1
-            where = DIRECTION_TITLES.get(direction, "?") if direction else "—"
-            self._journal(f"дёрнул мышь на 1 px {where} и вернул ({reason})")
+            where = tr(DIRECTION_KEYS[direction]) if direction else "—"
+            self._journal(
+                "journal_jiggled", direction=where, reason=reason
+            )
 
     def _fail(self, message: str) -> None:
         """Отказ, после которого продолжать нельзя."""
         self.running = False
         self.keeper.stop()
-        self.toggle_button.configure(text="Старт")
-        self.status_override = f"ошибка: {message.splitlines()[0]}"
+        self.toggle_button.configure(text=tr("button_start"))
+        self.status_override = tr("status_error", message=message.splitlines()[0])
         self.status_var.set(self.status_override)
-        self._journal(f"ошибка: {message}")
-        messagebox.showerror("Работа остановлена", message, parent=self.root)
+        self._journal("journal_error", message=message)
+        messagebox.showerror(tr("work_stopped_title"), message, parent=self.root)
 
     # ── журнал, конфиг, закрытие ────────────────────────────────────────────
 
-    def _journal(self, text: str) -> None:
-        stamp = datetime.now().strftime("%H:%M:%S")
-        self.journal.insert(0, f"{stamp}  {text}")
+    def _journal(self, key: str, **params: object) -> None:
+        self._add_journal_entry((datetime.now().strftime("%H:%M:%S"), key, params))
+
+    def _journal_raw(self, text: str) -> None:
+        """Готовая строка: замечания из конфига и сообщения дёргалки."""
+        self._add_journal_entry((datetime.now().strftime("%H:%M:%S"), None, text))
+
+    def _add_journal_entry(self, entry: tuple[str, str | None, object]) -> None:
+        self.journal_entries.insert(0, entry)
+        self._trim_journal()
+        self._render_journal()
+
+    def _trim_journal(self) -> None:
         limit = max(0, int(self.cfg.log_limit))
-        while self.journal.size() > limit:
-            self.journal.delete("end")
+        while len(self.journal_entries) > limit:
+            self.journal_entries.pop()
+
+    def _render_journal(self) -> None:
+        if not hasattr(self, "journal"):
+            return
+        self.journal.delete(0, "end")
+        for stamp, key, payload in reversed(self.journal_entries):
+            if key is None:
+                text = str(payload)
+            else:
+                text = tr(key, **payload)  # type: ignore[arg-type]
+            self.journal.insert(0, f"{stamp}  {text}")
 
     def _save(self) -> None:
         try:
             config_module.save(self.cfg, self.cfg_path)
         except OSError as exc:
-            self._journal(f"конфиг не сохранён: {exc}")
+            self._journal("journal_config_save_failed", error=exc)
 
     def _on_close(self) -> None:
         self._stop()
         self.root.destroy()
+
+    # ── About ──────────────────────────────────────────────────────────────
+
+    def _show_about(self) -> None:
+        window = tk.Toplevel(self.root)
+        window.title(tr("about_title"))
+        window.transient(self.root)
+        window.resizable(False, False)
+
+        title_font = tkfont.nametofont("TkDefaultFont").copy()
+        title_font.configure(size=14, weight="bold")
+
+        outer = ttk.Frame(window, padding=16)
+        outer.grid(row=0, column=0, sticky="nsew")
+        outer.columnconfigure(0, weight=1)
+
+        ttk.Label(outer, text="activity-renew", font=title_font).grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Label(outer, text=tr("about_version", version=__version__)).grid(
+            row=1, column=0, sticky="w", pady=(2, 10)
+        )
+        ttk.Label(
+            outer,
+            text=tr("about_description"),
+            wraplength=380,
+            justify="left",
+        ).grid(row=2, column=0, sticky="w")
+        ttk.Label(
+            outer,
+            text=tr("about_platform"),
+            wraplength=380,
+            justify="left",
+        ).grid(row=3, column=0, sticky="w", pady=(8, 16))
+        close_button = ttk.Button(
+            outer, text=tr("button_close"), command=window.destroy
+        )
+        close_button.grid(row=4, column=0, sticky="e")
+        close_button.focus_set()
+
+        # По центру главного окна, а не по центру экрана. Первая установка
+        # нужна, чтобы окно появилось и оконный менеджер сообщил реальные
+        # размеры вместе с рамкой; вторая — поправка на эту рамку.
+        window.update_idletasks()
+        width = window.winfo_reqwidth()
+        height = window.winfo_reqheight()
+        root_width = self.root.winfo_width() or self.root.winfo_reqwidth()
+        root_height = self.root.winfo_height() or self.root.winfo_reqheight()
+        x = self.root.winfo_rootx() + max(0, (root_width - width) // 2)
+        y = self.root.winfo_rooty() + max(0, (root_height - height) // 2)
+        window.geometry(f"+{x}+{y}")
+        window.update()
+
+        target_x = self.root.winfo_rootx() + max(
+            0, (root_width - window.winfo_width()) // 2
+        )
+        target_y = self.root.winfo_rooty() + max(
+            0, (root_height - window.winfo_height()) // 2
+        )
+        x += target_x - window.winfo_rootx()
+        y += target_y - window.winfo_rooty()
+        window.geometry(f"+{x}+{y}")
+
+        window.bind("<Escape>", lambda _event: window.destroy())
+        window.bind("<Return>", lambda _event: window.destroy())
+        window.grab_set()
 
 
 def run(source: GnomeIdleSource, cfg: Config, cfg_path: Path | None = None,
