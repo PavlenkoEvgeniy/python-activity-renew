@@ -55,9 +55,19 @@ def _report_error(title: str, message: str) -> int:
 def _run_check(source: GnomeIdleSource, cfg: config_module.Config) -> int:
     """Диагностика: что доступно, что нет. Мышь проверяется сдвигом на 25 px."""
     from .jiggler import ActivityKeeper, JigglerUnavailable
+    from .tray import Tray, TrayUnavailable
 
     print(f"activity-renew {__version__}")
     print(tr("check_idle_source", description=source.describe()))
+
+    tray = Tray(lambda: None, lambda: None)
+    try:
+        tray.start()
+        print(tr("check_tray_available"))
+    except TrayUnavailable as exc:
+        print(tr("check_tray_failed", error=exc))
+    else:
+        tray.stop()
 
     keeper = ActivityKeeper("uinput", cfg.jiggle_hold_ms)
     try:

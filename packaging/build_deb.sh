@@ -63,7 +63,7 @@ Version: $VERSION
 Section: utils
 Priority: optional
 Architecture: all
-Depends: python3 (>= 3.10), python3-tk, python3-dbus, python3-evdev, xdotool
+Depends: python3 (>= 3.10), python3-tk, python3-dbus, python3-gi, python3-evdev, xdotool
 Installed-Size: $SIZE
 Maintainer: $MAINTAINER
 Description: activity simulation so the session is not considered idle

@@ -5,8 +5,9 @@ so the session is not considered idle.
 
 The tkinter window lets you set the interval, start and stop the simulation,
 pick a mode, switch the interface language (English or Russian) and watch the
-event log. **Help → About** shows the version and a short description in a
-dialog centered over the main window.
+event log. Closing the window hides it to the system tray instead of quitting,
+and the simulation keeps running. **Help → About** shows the version and a
+short description in a dialog centered over the main window.
 
 ## Why this is not just XTest
 
@@ -41,7 +42,7 @@ release is published (`.github/workflows/release.yml`).
 manual steps:
 
 ```bash
-sudo apt install ./activity-renew_0.2.0_all.deb
+sudo apt install ./activity-renew_0.3.0_all.deb
 activity-renew
 ```
 
@@ -70,7 +71,8 @@ nothing has to be installed from pip:
 |---|---|---|
 | Python 3 | | `python3` |
 | tkinter | window | `python3-tk` |
-| dbus-python | idle time, lock state, inhibit | `python3-dbus` |
+| dbus-python | idle time, lock state, inhibit, tray | `python3-dbus` |
+| PyGObject | GLib event loop for tray callbacks | `python3-gi` |
 | evdev | virtual mouse | `python3-evdev` |
 | xdotool | cursor position and screen size | `xdotool` |
 
@@ -100,7 +102,8 @@ python3 -m activity_renew --check
 ```
 
 The command moves the cursor 25 px and back. If it does not move, you will see
-exactly that reason instead of a silent “seems to work”.
+exactly that reason instead of a silent “seems to work”. It also reports
+whether the tray icon can be created in this session.
 
 ## Running
 
@@ -112,6 +115,22 @@ python3 -m activity_renew
 Only one copy can run at a time: the second one shows “Already running” and
 exits. The lock is a `flock` in `$XDG_RUNTIME_DIR`; the kernel releases it, so
 there is nothing to clean up.
+
+## Closing to the tray
+
+Closing the window does not quit: it hides the window and leaves an icon in
+the system tray, while the simulation keeps running. The tray menu has
+**Show window** and **Quit**.
+
+GNOME has no tray of its own: the icon is drawn by the *AppIndicator and
+KStatusNotifierItem Support* extension (enabled by default on Ubuntu). The
+application talks to it over D-Bus through `org.kde.StatusNotifierItem`. If the
+host is not available, the window cannot be hidden anywhere, so closing it
+quits; the event log says so at startup. The same happens when `python3-gi` is
+missing, since the GLib event loop is what feeds tray clicks to the program.
+
+If the extension is disabled while the window is hidden, the program notices
+that the icon is gone and brings the window back rather than staying invisible.
 
 ## Modes
 
@@ -170,9 +189,9 @@ python3 -m unittest discover -s tests -t .
 ```
 
 The tests cover pure logic: the “time to jiggle” decision on a fake clock,
-configuration parsing and validation, and interface translations. The GUI,
-D-Bus and evdev are not covered by tests; `--check` verifies them on a live
-session.
+configuration parsing and validation, interface translations, and the tray
+icon and menu labels. The GUI, D-Bus and evdev are not covered by tests;
+`--check` verifies them on a live session.
 
 ## Known limitations
 

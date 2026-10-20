@@ -60,6 +60,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "journal_config_save_failed": "config not saved: {error}",
         "journal_language_changed": "interface language: {language}",
         "journal_inhibit_acquired": "idle inhibit acquired via {via}",
+        "journal_hidden_to_tray": (
+            "window hidden to the tray — the simulation keeps running"
+        ),
+        "journal_tray_unavailable": (
+            "system tray unavailable: {error} — closing the window will quit"
+        ),
+        "journal_tray_lost": (
+            "the tray icon disappeared because its host is gone — the window "
+            "stays open"
+        ),
+        # ── трей ───────────────────────────────────────────────────────────
+        "tray_show_window": "Show window",
+        "tray_quit": "Quit",
+        "tray_tooltip_running": "simulating activity",
+        "tray_no_glib": (
+            "PyGObject (python3-gi) is missing, so there is no event loop for "
+            "D-Bus and no tray icon ({error})"
+        ),
+        "tray_no_watcher": (
+            "the session has no StatusNotifierWatcher; on GNOME the tray is "
+            "provided by the AppIndicator extension"
+        ),
+        "tray_failed": "could not create the tray icon: {error}",
         # ── диалоги ────────────────────────────────────────────────────────
         "error_not_number_title": "Not a number",
         "error_not_number_message": (
@@ -75,8 +98,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "error_already_running_title": "Already running",
         "error_already_running_message": (
             "A second copy would jiggle the mouse twice as often and fight "
-            "over the configuration file. Find the activity-renew window "
-            "that is already open."
+            "over the configuration file. Find the activity-renew icon in the "
+            "system tray or the window that is already open."
         ),
         # ── About ──────────────────────────────────────────────────────────
         "about_title": "About activity-renew",
@@ -95,6 +118,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "check_mouse_note": "virtual mouse: {note}",
         "check_inhibit_available": "idle inhibit: available",
         "check_inhibit_failed": "idle inhibit: NOT WORKING — {error}",
+        "check_tray_available": "tray icon: available",
+        "check_tray_failed": "tray icon: NOT WORKING — {error}",
         # ── конфиг ─────────────────────────────────────────────────────────
         "warn_not_number": (
             "{what}: {value!r} does not look like a number — using {default}"
@@ -199,6 +224,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "journal_config_save_failed": "конфиг не сохранён: {error}",
         "journal_language_changed": "язык интерфейса: {language}",
         "journal_inhibit_acquired": "ингибит простоя взят через {via}",
+        "journal_hidden_to_tray": (
+            "окно свёрнуто в трей — имитация продолжает работать"
+        ),
+        "journal_tray_unavailable": (
+            "системный трей недоступен: {error} — крестик завершит программу"
+        ),
+        "journal_tray_lost": (
+            "иконка трея пропала, потому что хост закрылся — окно остаётся "
+            "открытым"
+        ),
+        # ── трей ───────────────────────────────────────────────────────────
+        "tray_show_window": "Показать окно",
+        "tray_quit": "Выйти",
+        "tray_tooltip_running": "имитация активности",
+        "tray_no_glib": (
+            "нет PyGObject (python3-gi), поэтому D-Bus нечем обслуживать и "
+            "иконку в трее показать нечем ({error})"
+        ),
+        "tray_no_watcher": (
+            "в сессии нет StatusNotifierWatcher; на GNOME трей даёт расширение "
+            "AppIndicator"
+        ),
+        "tray_failed": "не удалось создать иконку трея: {error}",
         # ── диалоги ────────────────────────────────────────────────────────
         "error_not_number_title": "Не число",
         "error_not_number_message": "«{value}» не похоже на число секунд.",
@@ -212,7 +260,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "error_already_running_title": "Уже запущено",
         "error_already_running_message": (
             "Вторая копия дёргала бы мышь вдвое чаще и спорила за файл "
-            "конфигурации. Найдите уже открытое окно activity-renew."
+            "конфигурации. Найдите иконку activity-renew в системном трее или "
+            "уже открытое окно."
         ),
         # ── About ──────────────────────────────────────────────────────────
         "about_title": "О программе activity-renew",
@@ -232,6 +281,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "check_mouse_note": "виртуальная мышь: {note}",
         "check_inhibit_available": "ингибит простоя: доступен",
         "check_inhibit_failed": "ингибит простоя: НЕ РАБОТАЕТ — {error}",
+        "check_tray_available": "иконка в трее: доступна",
+        "check_tray_failed": "иконка в трее: НЕ РАБОТАЕТ — {error}",
         # ── конфиг ─────────────────────────────────────────────────────────
         "warn_not_number": "{what}: {value!r} не похоже на число — беру {default}",
         "warn_below_min": "{what}: {number} меньше минимума — поднял до {low}",

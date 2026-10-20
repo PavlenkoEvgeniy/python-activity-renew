@@ -16,6 +16,14 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v5
+
+      - name: Системные модули
+        # Трей импортирует dbus; gi нужен, чтобы код шёл тем же путём, что и
+        # в собранном приложении.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-dbus python3-gi
+
       - name: Юнит-тесты
         run: python3 -m unittest discover -s tests -t . -v
 
@@ -32,11 +40,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            python3-venv python3-tk python3-dbus python3-evdev
+            python3-venv python3-tk python3-dbus python3-gi python3-evdev
 
       - name: Сборка бинарника
         run: |
-          # --system-site-packages: tkinter, dbus и evdev взяты из apt, а не из pip
+          # --system-site-packages: tkinter, dbus, gi и evdev взяты из apt, а
+          # не из pip. gi нужен трею: через него dbus-python обслуживает
+          # входящие вызовы.
           python3 -m venv --system-site-packages .venv
           .venv/bin/pip install --upgrade pip
           .venv/bin/pip install pyinstaller
@@ -45,6 +55,8 @@ jobs:
             --name activity-renew \
             --collect-submodules dbus \
             --hidden-import evdev \
+            --hidden-import gi \
+            --hidden-import gi.repository.GLib \
             main.py
 
       - name: Бинарник запускается

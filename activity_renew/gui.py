@@ -28,8 +28,12 @@ from .i18n import tr
 from .idle import GnomeIdleSource, IdleSourceUnavailable
 from .jiggler import ActivityKeeper, JigglerUnavailable
 from .scheduler import Decision, Scheduler
+from .tray import Tray, TrayUnavailable
 
 TICK_MS = 1000
+#: Входящие вызовы D-Bus (клики по трею) обслуживаются этим же потоком:
+#: своего цикла у tkinter нет, поэтому GLib-контекст прокачивается таймером.
+TRAY_PUMP_MS = 100
 
 DIRECTION_KEYS = {
     (0, -1): "direction_up",
@@ -63,6 +67,9 @@ class App:
         self.busy = False
         self.jiggle_count = 0
         self.journal_visible = True
+        self.tray: Tray | None = None
+        self._tray_job: str | None = None
+        self._closing = False
         #: Текст ошибки, который переживает остановку и не даёт такту затереть себя.
         self.status_override: str | None = None
         self.events: queue.Queue = queue.Queue()
@@ -72,6 +79,7 @@ class App:
         self._build()
         for note in self.startup_warnings:
             self._journal_raw(tr("journal_config_note", note=note))
+        self._start_tray()
         self._tick_job: str | None = self.root.after(TICK_MS, self._tick)
 
     # ── построение окна ────────────────────────────────────────────────────
@@ -254,6 +262,8 @@ class App:
         self.cfg.language = language
         self._save()
         self._rebuild()
+        if self.tray is not None:
+            self.tray.refresh()
         self._journal(
             "journal_language_changed", language=i18n.language_name(language)
         )
@@ -292,6 +302,8 @@ class App:
             return
 
         self.running = True
+        if self.tray is not None:
+            self.tray.set_running(True)
         self.jiggle_count = 0
         self.status_override = None
         self.scheduler.mark_jiggled()  # отсчёт интервала начинается с пуска
@@ -301,6 +313,8 @@ class App:
 
     def _stop(self) -> None:
         self.running = False
+        if self.tray is not None:
+            self.tray.set_running(False)
         self.keeper.stop()
         self.toggle_button.configure(text=tr("button_start"))
         self._journal("journal_stopped")
@@ -393,6 +407,8 @@ class App:
     def _fail(self, message: str) -> None:
         """Отказ, после которого продолжать нельзя."""
         self.running = False
+        if self.tray is not None:
+            self.tray.set_running(False)
         self.keeper.stop()
         self.toggle_button.configure(text=tr("button_start"))
         self.status_override = tr("status_error", message=message.splitlines()[0])
@@ -436,7 +452,61 @@ class App:
         except OSError as exc:
             self._journal("journal_config_save_failed", error=exc)
 
+    # ── трей ────────────────────────────────────────────────────────────────
+
+    def _start_tray(self) -> None:
+        """Завести иконку, если в сессии есть кому её нарисовать."""
+        tray = Tray(
+            on_show=self._show_window,
+            on_quit=self._quit,
+            on_lost=self._on_tray_lost,
+        )
+        try:
+            tray.start()
+        except TrayUnavailable as exc:
+            self._journal("journal_tray_unavailable", error=exc)
+            return
+        except Exception as exc:  # иконка не имеет права ронять приложение
+            self._journal("journal_tray_unavailable", error=exc)
+            return
+        self.tray = tray
+        self.tray.set_running(self.running)
+        self._tray_job = self.root.after(TRAY_PUMP_MS, self._pump_tray)
+
+    def _pump_tray(self) -> None:
+        if self.tray is not None:
+            self.tray.pump()
+        if not self._closing:
+            self._tray_job = self.root.after(TRAY_PUMP_MS, self._pump_tray)
+
+    def _show_window(self) -> None:
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+
+    def _hide_to_tray(self) -> None:
+        self.root.withdraw()
+        self._journal("journal_hidden_to_tray")
+
+    def _on_tray_lost(self) -> None:
+        # Хост трея (расширение) выключили: иконки больше нет. Если окно было
+        # спрятано, его надо вернуть, иначе программа станет невидимой.
+        self.tray = None
+        if self.root.state() == "withdrawn":
+            self._show_window()
+        self._journal("journal_tray_lost")
+
     def _on_close(self) -> None:
+        if self.tray is not None and self.tray.available:
+            self._hide_to_tray()
+        else:
+            self._quit()
+
+    def _quit(self) -> None:
+        self._closing = True
+        if self.tray is not None:
+            self.tray.stop()
+            self.tray = None
         self._stop()
         self.root.destroy()
 
